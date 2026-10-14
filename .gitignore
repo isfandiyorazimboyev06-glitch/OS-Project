@@ -1,0 +1,13 @@
+# Executables
+server
+worker
+client
+
+# Object files
+*.o
+
+# Log and temporary test files
+*.log
+/tmp/test_*.log
+/tmp/id_*.txt
+/tmp/stress_*.txt
