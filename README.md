@@ -2,20 +2,22 @@
 ## Term Project — Distributed Job Runner (Fall 2026)
 
 **Team Number**: Team 12 (Job IDs: `T12-1`, `T12-2`, ...)  
-**Team Leader**: Isfandiyor (also owns Component 1: Protocol & Client)
+**Team Leader**: AZIMBOYEV ISFANDIYOR (also owns Component 1: Protocol & Client)
 
 ---
 
-### Component Ownership Declaration
+### Component Ownership Declaration (Team of 5)
+
+Per project requirements (§3), a team of five declares five components, with the operations owner taking testing and load:
 
 | # | Component | Declared Owner | Deliverables & Responsibilities | Key Fair Defense Question & Answer |
 |---|---|---|---|---|
-| 1 | **Protocol and Client** | Isfandiyor (Team Leader) | Wire format framing, client CLI program, message parsing, error codes. | *"A client dies halfway through a submit. Where does your read loop handle that?"*<br>**Answer**: The server reads asynchronously in `handle_client_request()`. If client disconnects early, `read()` returns 0 or error, and the server cleans up `g_conns[slot]` without affecting other clients or corrupting the job table. |
-| 2 | **Scheduler and Policy** | Team Member 2 | Job queue, Priority with Aging scheduling policy, dispatch logic, policy trace. | *"Switch to priority now. What starves, and what stops it?"*<br>**Answer**: Low priority jobs (priority 0) would starve under heavy load. To prevent starvation, our aging algorithm calculates `effective_priority = base_priority + (wait_time / 5s)`. Every 5 seconds spent queued increments effective priority by +1, guaranteeing eventually every job runs. |
-| 3 | **Worker and Limits** | Team Member 3 | Worker daemon, process groups (`setpgid`), `fork`/`exec` via `/bin/sh -c`, stdout+stderr pipe capture, timeout enforcement, honest exit reporting, zero zombies. | *"Which line turns a timeout kill into KILLED, not DONE 0?"*<br>**Answer**: In `worker.c`, when the timer fires, we mark `job->kill_reason = KILL_TIMEOUT` before issuing `kill(-job->pid, SIGKILL)`. When `waitpid()` reaps the child, it checks `kill_reason` first. If `KILL_TIMEOUT`, it reports `KILLED_TIMEOUT 0` instead of a normal exit. |
-| 4 | **Durability and Recovery** | Team Member 4 | Central job table, state machine transitions (`QUEUED`, `RUNNING`, `DONE`, `KILLED`, `CANCELLED`), cancel handling across server & worker, worker goodbye. | *"I cancel a running job. Which processes notice, and how?"*<br>**Answer**: The server receives `CANCEL <id>`, identifies the worker hosting it, and sends `CANCEL_JOB <id>` to that worker over TCP. The worker sends `kill(-pgid, SIGKILL)` to the job's entire process group, reaps the child, and reports `CANCELLED` back to the server. |
-| 5 | **Operations and Report** | Team Member 5 | `Makefile`, repo history, build verification, documentation, project report. | *"Show me a fresh clone building, and where the trace in your report came from."*<br>**Answer**: `make` runs `gcc -Wall -Wextra -O2 -D_GNU_SOURCE -pthread` producing `server`, `worker`, and `client`. The trace is recorded directly from the server event logs during scheduling runs. |
-| 6 | **Testing and Load** | Team Member 6 | Automated self-check script (`tests/self_check.sh`), concurrency benchmarks, zombie checks, descriptor leak validation. | *"Run the test that proves no descriptor leaks. Which check would have caught last week's bug?"*<br>**Answer**: `tests/self_check.sh` row 11 measures `/proc/<pid>/fd` before and after 100 jobs. An unclosed write end or socket would cause FD counts to increase, immediately failing row 11. |
+| 1 | **Protocol and Client** | **AZIMBOYEV ISFANDIYOR** (Team Leader) | Wire format framing, client CLI program, message parsing, error codes. | *"A client dies halfway through a submit. Where does your read loop handle that?"*<br>**Answer**: The server reads asynchronously in `handle_client_request()`. If client disconnects early, `read()` returns 0 or error, and the server cleans up `g_conns[slot]` without affecting other clients or corrupting the job table. |
+| 2 | **Scheduler and Policy** | **ASRARXANOV ASADBEK** | Job queue, Priority with Aging scheduling policy, dispatch logic, policy trace. | *"Switch to priority now. What starves, and what stops it?"*<br>**Answer**: Low priority jobs (priority 0) would starve under heavy load. To prevent starvation, our aging algorithm calculates `effective_priority = base_priority + (wait_time / 5s)`. Every 5 seconds spent queued increments effective priority by +1, guaranteeing eventually every job runs. |
+| 3 | **Worker and Limits** | **AXMEDOV FERUZBEK** | Worker daemon, process groups (`setpgid`), `fork`/`exec` via `/bin/sh -c`, stdout+stderr pipe capture, timeout enforcement, honest exit reporting, zero zombies. | *"Which line turns a timeout kill into KILLED, not DONE 0?"*<br>**Answer**: In `worker.c`, when the timer fires, we mark `job->kill_reason = KILL_TIMEOUT` before issuing `kill(-job->pid, SIGKILL)`. When `waitpid()` reaps the child, it checks `kill_reason` first. If `KILL_TIMEOUT`, it reports `KILLED_TIMEOUT 0` instead of a normal exit. |
+| 4 | **Durability and Recovery** | **BAXTIYOROV BOTIRXO'JA** | Central job table, state machine transitions (`QUEUED`, `RUNNING`, `DONE`, `KILLED`, `CANCELLED`), cancel handling across server & worker, worker goodbye. | *"I cancel a running job. Which processes notice, and how?"*<br>**Answer**: The server receives `CANCEL <id>`, identifies the worker hosting it, and sends `CANCEL_JOB <id>` to that worker over TCP. The worker sends `kill(-pgid, SIGKILL)` to the job's entire process group, reaps the child, and reports `CANCELLED` back to the server. |
+| 5 | **Operations, Testing & Report** | **AZIZOV ABRORXON** | `Makefile`, repo history, build verification, `tests/self_check.sh`, `tests/stress_test.sh`, descriptor leak and zombie checks, project report. | *"Run the test that proves no descriptor leaks. Which check would have caught last week's bug?"*<br>**Answer**: `tests/self_check.sh` row 11 measures `/proc/<pid>/fd` before and after 100 jobs. An unclosed write end or socket would cause FD counts to increase, immediately failing row 11. |
+
 
 ---
 
