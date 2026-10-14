@@ -1,11 +1,11 @@
 # Distributed Job Runner — System Report (Phase 1)
 **Course**: SOC 3010 Operating Systems — Inha University in Tashkent (Fall 2026)  
 **Team**: Team 12  
-**Team Leader**: AZIMBOYEV ISFANDIYOR  
+**Team Leader**: ASRARXANOV ASADBEK  
 
 **Team Members & Component Owners**:
-- **AZIMBOYEV ISFANDIYOR**: Component 1 (Protocol and Client)
-- **ASRARXANOV ASADBEK**: Component 2 (Scheduler and Policy)
+- **ASRARXANOV ASADBEK**: Component 1 (Protocol and Client)
+- **AZIMBOYEV ISFANDIYOR**: Component 2 (Scheduler and Policy)
 - **AXMEDOV FERUZBEK**: Component 3 (Worker and Limits)
 - **BAXTIYOROV BOTIRXO'JA**: Component 4 (Durability and Recovery)
 - **AZIZOV ABRORXON**: Component 5 (Operations, Testing and Report)
