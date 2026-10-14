@@ -1,4 +1,5 @@
 #include "common.h"
+#include <sys/resource.h>
 
 typedef struct {
     char id[64];
@@ -28,17 +29,20 @@ typedef struct {
     size_t buf_len;
 } ConnState;
 
-#define MAX_CONNS 256
-#define MAX_SERVER_WORKERS 32
+#define MAX_SERVER_WORKERS 64
 
-static ServerJob g_jobs[MAX_JOBS];
+/* Dynamically resizable job array */
+static ServerJob *g_jobs = NULL;
 static int g_job_count = 0;
+static int g_job_capacity = 0;
 static int g_next_job_id = 1;
 
 static ServerWorker g_workers[MAX_SERVER_WORKERS];
 
+/* Dynamically resizable connection array */
+static ConnState *g_conns = NULL;
+static int g_conn_capacity = 0;
 
-static ConnState g_conns[MAX_CONNS];
 static volatile sig_atomic_t g_server_stop = 0;
 
 static void sigterm_handler(int sig) {
@@ -46,7 +50,15 @@ static void sigterm_handler(int sig) {
     g_server_stop = 1;
 }
 
+/* O(1) Fast lookup with O(N) fallback */
 static ServerJob *find_job(const char *id) {
+    size_t prefix_len = strlen(TEAM_PREFIX);
+    if (strncmp(id, TEAM_PREFIX "-", prefix_len + 1) == 0) {
+        int idx = atoi(id + prefix_len + 1) - 1;
+        if (idx >= 0 && idx < g_job_count && strcmp(g_jobs[idx].id, id) == 0) {
+            return &g_jobs[idx];
+        }
+    }
     for (int i = 0; i < g_job_count; i++) {
         if (strcmp(g_jobs[i].id, id) == 0) {
             return &g_jobs[i];
@@ -65,20 +77,21 @@ static ServerWorker *find_worker_by_fd(int fd) {
 }
 
 static void close_conn(int idx) {
-    if (g_conns[idx].fd >= 0) {
-        close(g_conns[idx].fd);
-        g_conns[idx].fd = -1;
+    if (idx >= 0 && idx < g_conn_capacity) {
+        if (g_conns[idx].fd >= 0) {
+            close(g_conns[idx].fd);
+            g_conns[idx].fd = -1;
+        }
+        g_conns[idx].buf_len = 0;
+        g_conns[idx].is_worker = 0;
     }
-    g_conns[idx].buf_len = 0;
-    g_conns[idx].is_worker = 0;
 }
 
 static void schedule_jobs(void) {
-    /* Priority with Aging scheduler */
     time_t now = time(NULL);
 
     while (1) {
-        /* Find a worker with free slot */
+        /* Find worker with free slot */
         ServerWorker *best_worker = NULL;
         for (int i = 0; i < MAX_SERVER_WORKERS; i++) {
             if (g_workers[i].active && g_workers[i].running_jobs < g_workers[i].K) {
@@ -87,11 +100,9 @@ static void schedule_jobs(void) {
             }
         }
 
-        if (!best_worker) {
-            break; /* No worker available */
-        }
+        if (!best_worker) break;
 
-        /* Find next QUEUED job with highest effective priority (ties: earliest submit_time) */
+        /* Priority with Aging: pick queued job with highest effective priority */
         ServerJob *best_job = NULL;
         int best_effective_prio = -1;
         time_t best_submit_time = 0;
@@ -111,11 +122,9 @@ static void schedule_jobs(void) {
             }
         }
 
-        if (!best_job) {
-            break; /* No queued jobs */
-        }
+        if (!best_job) break;
 
-        /* Dispatch job to best_worker */
+        /* Dispatch job */
         size_t cmd_len = strlen(best_job->cmd);
         char header[256];
         int hlen = snprintf(header, sizeof(header), "DISPATCH %s %d %zu\n",
@@ -131,7 +140,6 @@ static void schedule_jobs(void) {
             printf("job sent\n");
             fflush(stdout);
         } else {
-            /* Worker socket write error */
             best_worker->active = 0;
             close(best_worker->fd);
             best_worker->fd = -1;
@@ -144,7 +152,6 @@ static void handle_client_request(int conn_idx) {
     char *buf = c->buf;
     size_t len = c->buf_len;
 
-    /* Check for newline */
     char *nl = memchr(buf, '\n', len);
     if (!nl) return;
 
@@ -176,7 +183,6 @@ static void handle_client_request(int conn_idx) {
         const char *resp = "WORKER_OK\n";
         write_all(c->fd, resp, strlen(resp));
 
-        /* Consume line */
         size_t consumed = (nl - buf) + 1;
         memmove(buf, buf + consumed, len - consumed);
         c->buf_len -= consumed;
@@ -185,7 +191,7 @@ static void handle_client_request(int conn_idx) {
         return;
     }
 
-    /* If it's a client connection, log client connected once */
+    /* Print client connected once */
     printf("client connected\n");
     fflush(stdout);
 
@@ -196,8 +202,7 @@ static void handle_client_request(int conn_idx) {
         if (sscanf(line + 7, "%d %d %zu", &timeout, &priority, &cmd_len) == 3) {
             size_t header_len = (nl - buf) + 1;
             if (len < header_len + cmd_len) {
-                /* Command bytes not fully received yet */
-                return;
+                return; /* Wait for command bytes */
             }
 
             char *cmd = malloc(cmd_len + 1);
@@ -208,8 +213,17 @@ static void handle_client_request(int conn_idx) {
             memcpy(cmd, buf + header_len, cmd_len);
             cmd[cmd_len] = '\0';
 
-            /* Create job */
-            if (g_job_count < MAX_JOBS) {
+            /* Dynamically resize jobs if needed */
+            if (g_job_count >= g_job_capacity) {
+                int new_cap = (g_job_capacity == 0) ? 1024 : g_job_capacity * 2;
+                ServerJob *new_jobs = realloc(g_jobs, new_cap * sizeof(ServerJob));
+                if (new_jobs) {
+                    g_jobs = new_jobs;
+                    g_job_capacity = new_cap;
+                }
+            }
+
+            if (g_job_count < g_job_capacity) {
                 ServerJob *job = &g_jobs[g_job_count++];
                 memset(job, 0, sizeof(*job));
                 snprintf(job->id, sizeof(job->id), "%s-%d", TEAM_PREFIX, g_next_job_id++);
@@ -269,7 +283,6 @@ static void handle_client_request(int conn_idx) {
             const char *resp = "CANCEL_OK\n";
             write_all(c->fd, resp, strlen(resp));
         } else if (job->state == STATE_RUNNING) {
-            /* Send cancel to worker */
             if (job->assigned_worker_fd >= 0) {
                 char cancel_msg[128];
                 int clen = snprintf(cancel_msg, sizeof(cancel_msg), "CANCEL_JOB %s\n", job->id);
@@ -305,7 +318,6 @@ static void handle_client_request(int conn_idx) {
         return;
 
     } else {
-        /* Unrecognized client command */
         const char *resp = "UNKNOWN\n";
         write_all(c->fd, resp, strlen(resp));
         close_conn(conn_idx);
@@ -336,10 +348,7 @@ static void handle_worker_data(int conn_idx) {
 
             if (sscanf(line + 7, "%127s %63s %63s %zu", job_id, state_type, state_arg, &out_len) == 4) {
                 size_t header_len = (nl - buf) + 1;
-                if (len < header_len + out_len) {
-                    /* Need more output bytes */
-                    break;
-                }
+                if (len < header_len + out_len) break;
 
                 ServerJob *job = find_job(job_id);
                 if (job) {
@@ -381,14 +390,12 @@ static void handle_worker_data(int conn_idx) {
 
                 schedule_jobs();
             } else {
-                /* Malformed report line, discard line */
                 size_t consumed = (nl - buf) + 1;
                 memmove(buf, buf + consumed, len - consumed);
                 len -= consumed;
                 c->buf_len = len;
             }
         } else {
-            /* Discard line */
             size_t consumed = (nl - buf) + 1;
             memmove(buf, buf + consumed, len - consumed);
             len -= consumed;
@@ -406,6 +413,13 @@ int main(int argc, char *argv[]) {
     int port = atoi(argv[1]);
 
     signal(SIGPIPE, SIG_IGN);
+
+    /* Maximize file descriptor limit */
+    struct rlimit rl;
+    if (getrlimit(RLIMIT_NOFILE, &rl) == 0) {
+        rl.rlim_cur = rl.rlim_max;
+        setrlimit(RLIMIT_NOFILE, &rl);
+    }
 
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
@@ -437,7 +451,8 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    if (listen(listen_fd, 128) < 0) {
+    /* Support high concurrency backlog */
+    if (listen(listen_fd, SOMAXCONN) < 0) {
         perror("listen");
         close(listen_fd);
         return 1;
@@ -448,23 +463,31 @@ int main(int argc, char *argv[]) {
     printf("server: listening on port %d\n", port);
     fflush(stdout);
 
-    for (int i = 0; i < MAX_CONNS; i++) {
+    /* Initialize connections array */
+    g_conn_capacity = 1024;
+    g_conns = malloc(g_conn_capacity * sizeof(ConnState));
+    for (int i = 0; i < g_conn_capacity; i++) {
         g_conns[i].fd = -1;
+        g_conns[i].buf_len = 0;
+        g_conns[i].is_worker = 0;
     }
 
+    /* Initialize jobs array */
+    g_job_capacity = 1024;
+    g_jobs = malloc(g_job_capacity * sizeof(ServerJob));
+
     while (!g_server_stop) {
-        struct pollfd pfds[MAX_CONNS + 1];
+        struct pollfd *pfds = malloc((g_conn_capacity + 1) * sizeof(struct pollfd));
+        int *conn_map = malloc((g_conn_capacity + 1) * sizeof(int));
         int nfds = 0;
 
         pfds[0].fd = listen_fd;
         pfds[0].events = POLLIN;
         pfds[0].revents = 0;
+        conn_map[0] = -1;
         nfds = 1;
 
-        int conn_map[MAX_CONNS + 1];
-        conn_map[0] = -1;
-
-        for (int i = 0; i < MAX_CONNS; i++) {
+        for (int i = 0; i < g_conn_capacity; i++) {
             if (g_conns[i].fd >= 0) {
                 pfds[nfds].fd = g_conns[i].fd;
                 pfds[nfds].events = POLLIN;
@@ -474,8 +497,10 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        int ret = poll(pfds, nfds, 100); /* 100ms tick */
+        int ret = poll(pfds, nfds, 100);
         if (ret < 0) {
+            free(pfds);
+            free(conn_map);
             if (errno == EINTR) {
                 if (g_server_stop) break;
                 continue;
@@ -483,27 +508,44 @@ int main(int argc, char *argv[]) {
             break;
         }
 
-        if (g_server_stop) break;
+        if (g_server_stop) {
+            free(pfds);
+            free(conn_map);
+            break;
+        }
 
-        /* Check listening socket for new connections */
+        /* Accept new connections */
         if (pfds[0].revents & POLLIN) {
             while (1) {
                 struct sockaddr_in client_addr;
                 socklen_t client_len = sizeof(client_addr);
                 int client_fd = accept(listen_fd, (struct sockaddr *)&client_addr, &client_len);
-                if (client_fd < 0) {
-                    if (errno == EAGAIN || errno == EWOULDBLOCK) break;
-                    break;
-                }
+                if (client_fd < 0) break;
 
                 set_tcp_nodelay(client_fd);
                 set_nonblocking(client_fd);
 
                 int slot = -1;
-                for (int i = 0; i < MAX_CONNS; i++) {
+                for (int i = 0; i < g_conn_capacity; i++) {
                     if (g_conns[i].fd < 0) {
                         slot = i;
                         break;
+                    }
+                }
+
+                /* Dynamically expand connections if at capacity */
+                if (slot == -1) {
+                    int new_cap = g_conn_capacity * 2;
+                    ConnState *new_conns = realloc(g_conns, new_cap * sizeof(ConnState));
+                    if (new_conns) {
+                        for (int k = g_conn_capacity; k < new_cap; k++) {
+                            new_conns[k].fd = -1;
+                            new_conns[k].buf_len = 0;
+                            new_conns[k].is_worker = 0;
+                        }
+                        slot = g_conn_capacity;
+                        g_conns = new_conns;
+                        g_conn_capacity = new_cap;
                     }
                 }
 
@@ -518,37 +560,38 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        /* Check client/worker sockets */
+        /* Handle client and worker events */
         for (int i = 1; i < nfds; i++) {
             if (pfds[i].revents & (POLLIN | POLLHUP | POLLERR)) {
                 int c_idx = conn_map[i];
-                if (c_idx < 0 || g_conns[c_idx].fd < 0) continue;
-
-                ConnState *c = &g_conns[c_idx];
-                char temp[4096];
-                ssize_t n = read(c->fd, temp, sizeof(temp));
-                if (n > 0) {
-                    if (c->buf_len + (size_t)n < sizeof(c->buf)) {
-                        memcpy(c->buf + c->buf_len, temp, n);
-                        c->buf_len += n;
+                if (c_idx >= 0 && c_idx < g_conn_capacity && g_conns[c_idx].fd >= 0) {
+                    ConnState *c = &g_conns[c_idx];
+                    char temp[4096];
+                    ssize_t n = read(c->fd, temp, sizeof(temp));
+                    if (n > 0) {
+                        if (c->buf_len + (size_t)n < sizeof(c->buf)) {
+                            memcpy(c->buf + c->buf_len, temp, n);
+                            c->buf_len += n;
+                        }
+                        if (c->is_worker) {
+                            handle_worker_data(c_idx);
+                        } else {
+                            handle_client_request(c_idx);
+                        }
+                    } else if (n == 0 || (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK)) {
+                        if (c->is_worker) {
+                            ServerWorker *w = find_worker_by_fd(c->fd);
+                            if (w) w->active = 0;
+                        }
+                        close_conn(c_idx);
                     }
-                    if (c->is_worker) {
-                        handle_worker_data(c_idx);
-                    } else {
-                        handle_client_request(c_idx);
-                    }
-                } else if (n == 0 || (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK)) {
-                    /* Disconnected */
-                    if (c->is_worker) {
-                        ServerWorker *w = find_worker_by_fd(c->fd);
-                        if (w) w->active = 0;
-                    }
-                    close_conn(c_idx);
                 }
             }
         }
 
-        /* Periodic aging and scheduling update */
+        free(pfds);
+        free(conn_map);
+
         schedule_jobs();
     }
 
@@ -557,11 +600,18 @@ int main(int argc, char *argv[]) {
     fflush(stdout);
 
     close(listen_fd);
-    for (int i = 0; i < MAX_CONNS; i++) {
+    for (int i = 0; i < g_conn_capacity; i++) {
         if (g_conns[i].fd >= 0) {
             close(g_conns[i].fd);
         }
     }
+    free(g_conns);
+
+    for (int i = 0; i < g_job_count; i++) {
+        if (g_jobs[i].cmd) free(g_jobs[i].cmd);
+        if (g_jobs[i].output) free(g_jobs[i].output);
+    }
+    free(g_jobs);
 
     return 0;
 }
