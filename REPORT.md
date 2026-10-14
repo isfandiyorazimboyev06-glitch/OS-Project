@@ -1,10 +1,10 @@
 # Distributed Job Runner — System Report (Phase 1)
 **Course**: SOC 3010 Operating Systems — Inha University in Tashkent (Fall 2026)  
-**Team**: Team 12  
+**Team**: Team 9  
 **Team Leader**: ASRARXANOV ASADBEK  
 
 **Team Members & Component Owners**:
-- **ASRARXANOV ASADBEK**: Component 1 (Protocol and Client)
+- **ASRARXANOV ASADBEK**: Component 1 (Protocol and Client) — *Team Leader*
 - **AZIMBOYEV ISFANDIYOR**: Component 2 (Scheduler and Policy)
 - **AXMEDOV FERUZBEK**: Component 3 (Worker and Limits)
 - **BAXTIYOROV BOTIRXO'JA**: Component 4 (Durability and Recovery)
@@ -54,7 +54,7 @@ All control messages use line framing (`\n`). Fetch output and job commands use 
 #### Client $\leftrightarrow$ Server
 - **Submit**:
   - `SUBMIT <timeout> <priority> <cmd_length>\n<cmd_bytes>`
-  - Response: `JOB_ID <id>\n` (e.g. `JOB_ID T12-1`)
+  - Response: `JOB_ID <id>\n` (e.g. `JOB_ID T9-1`)
 - **Status**:
   - `STATUS <id>\n`
   - Response: `STATE <state_detail>\n` (e.g. `STATE QUEUED`, `STATE RUNNING`, `STATE DONE 0`, `STATE KILLED TIMEOUT`, `STATE KILLED SIGNAL 9`, `STATE CANCELLED`) or `UNKNOWN\n`

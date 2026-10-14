@@ -1,7 +1,7 @@
 # Inha University in Tashkent — Operating Systems (SOC 3010)
 ## Term Project — Distributed Job Runner (Fall 2026)
 
-**Team Number**: Team 12 (Job IDs: `T12-1`, `T12-2`, ...)  
+**Team Number**: Team 9 (Job IDs: `T9-1`, `T9-2`, ...)  
 **Team Leader**: ASRARXANOV ASADBEK (also owns Component 1: Protocol & Client)
 
 ---
@@ -19,7 +19,6 @@ Per project requirements (§3), a team of five declares five components, with th
 | 5 | **Operations, Testing & Report** | **AZIZOV ABRORXON** | `Makefile`, repo history, build verification, `tests/self_check.sh`, `tests/stress_test.sh`, descriptor leak and zombie checks, project report. | *"Run the test that proves no descriptor leaks. Which check would have caught last week's bug?"*<br>**Answer**: `tests/self_check.sh` row 11 measures `/proc/<pid>/fd` before and after 100 jobs. An unclosed write end or socket would cause FD counts to increase, immediately failing row 11. |
 
 
-
 ---
 
 ### Project Architecture & Design
@@ -33,7 +32,7 @@ The distributed job runner consists of three cooperating C programs:
                     ┌──────────────────────────────────────────────┐
                     │               Central Server                 │
                     │         (poll event loop, port 5000)         │
-                    │  - Priority with Aging Queue (T12-*)         │
+                    │  - Priority with Aging Queue (T9-*)          │
                     │  - Worker Capacity & Slot Tracking           │
                     └───────────▲──────────────────────▲───────────┘
                                 │                      │
@@ -91,20 +90,20 @@ worker: connected to 127.0.0.1:5000, K=2
 # Submit a job with timeout (10s) and priority (5)
 ./client 127.0.0.1 5000 submit "echo hello" 10 5
 # Outputs job ID, e.g.:
-# T12-1
+# T9-1
 
 # Check status of a job
-./client 127.0.0.1 5000 status T12-1
+./client 127.0.0.1 5000 status T9-1
 # Outputs:
-# T12-1 DONE 0
+# T9-1 DONE 0
 
 # Fetch captured output byte-for-byte
-./client 127.0.0.1 5000 fetch T12-1
+./client 127.0.0.1 5000 fetch T9-1
 # Outputs:
 # hello
 
 # Cancel a job
-./client 127.0.0.1 5000 cancel T12-1
+./client 127.0.0.1 5000 cancel T9-1
 ```
 
 ---
@@ -118,14 +117,14 @@ Run the automated self-check test suite implementing all 12 rows of Section 5.4:
 
 **Results Verified**:
 - **Row 1**: Clean build and correct startup output messages.
-- **Row 2**: Submitting `echo hello` -> `T12-1 DONE 0`, fetched output `hello`.
+- **Row 2**: Submitting `echo hello` -> `T9-1 DONE 0`, fetched output `hello`.
 - **Row 3**: `exit 3` -> `DONE 3`; `ls /nonexistent` -> `DONE 2` with captured error message.
 - **Row 4**: `sleep 100` with 2s timeout -> `KILLED TIMEOUT`; all child processes killed.
 - **Row 5**: Cancel running `sleep 30` -> reports `CANCELLED` and terminates background jobs.
 - **Row 6**: Serialization with `K=1` -> max concurrent count strictly $\le 1$; all done in under 12s.
 - **Row 7**: 8 parallel clients submitting in the same second -> 8 unique IDs in $<2$s, all done in $<25$s.
 - **Row 8**: Inactive `nc` connection does not block submissions from other clients.
-- **Row 9**: Querying unknown ID (`T12-99999`) exits with code 2 and prints `T12-99999 UNKNOWN`.
+- **Row 9**: Querying unknown ID (`T9-99999`) exits with code 2 and prints `T9-99999 UNKNOWN`.
 - **Row 10**: Zero zombie processes (`state Z`) in worker process tree.
 - **Row 11**: Zero file descriptor leaks before and after 100 jobs (`ls /proc/<pid>/fd | wc -l` remains identical).
 - **Row 12**: Clean SIGTERM handling: worker kills jobs, reports `KILLED SIGNAL 9`, and exits cleanly; server shuts down and allows immediate restart on same port without `Address already in use`.

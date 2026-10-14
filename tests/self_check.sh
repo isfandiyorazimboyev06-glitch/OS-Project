@@ -207,11 +207,11 @@ else
 fi
 
 # 9. Row 9: Unknown ID query
-echo -n "Row 9 (Query unknown ID T12-99999 -> exit code 2 & UNKNOWN): "
-OUT9=$($C status T12-99999 2>&1)
+echo -n "Row 9 (Query unknown ID T9-99999 -> exit code 2 & UNKNOWN): "
+OUT9=$($C status T9-99999 2>&1)
 CODE9=$?
 
-if [ "$CODE9" -eq 2 ] && [[ "$OUT9" == "T12-99999 UNKNOWN"* ]]; then
+if [ "$CODE9" -eq 2 ] && [[ "$OUT9" == "T9-99999 UNKNOWN"* ]]; then
     echo -e "${GREEN}PASS${NC}"
 else
     echo -e "${RED}FAIL (Output: '$OUT9', Exit code: $CODE9)${NC}"

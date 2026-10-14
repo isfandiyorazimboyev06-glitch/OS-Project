@@ -3,7 +3,7 @@
 
 #include <stddef.h>
 
-#define TEAM_PREFIX "T12"
+#define TEAM_PREFIX "T9"
 #define DEFAULT_PORT 5000
 #define DEFAULT_K 1
 #define MAX_JOBS 4096
